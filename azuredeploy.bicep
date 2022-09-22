@@ -43,6 +43,27 @@ resource environment 'Microsoft.App/managedEnvironments@2022-03-01' = {
       }
     }
   }
+  
+  / Storage Account to act as state store 
+resource storageAccount 'Microsoft.Storage/storageAccounts@2021-06-01' = {
+  name: storageAccountName
+  location: location
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+}
+
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2021-06-01' = {
+  parent: storageAccount
+  name: 'default'
+}
+
+resource blobContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2021-06-01' = {
+  parent: blobService
+  name: blobContainerName
+}
+
   resource daprComponent 'daprComponents@2022-03-01' = {
     name: 'statestore'
     properties: {
