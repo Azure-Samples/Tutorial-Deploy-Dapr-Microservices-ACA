@@ -1,0 +1,185 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment_name": {
+      "type": "string"
+    },
+    "location": {
+      "defaultValue": "canadacentral",
+      "type": "string"
+    },
+    "storage_account_name": {
+      "type": "string"
+    },
+    "storage_container_name": {
+      "type": "string"
+    }
+  },
+  "variables": {
+    "logAnalyticsWorkspaceName": "[concat('logs-', parameters('environment_name'))]",
+    "appInsightsName": "[concat('appins-', parameters('environment_name'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2021-06-01",
+      "name": "[variables('logAnalyticsWorkspaceName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "retentionInDays": 30,
+        "features": {
+          "searchVersion": 1
+        },
+        "sku": {
+          "name": "PerGB2018"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('appInsightsName')]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces/', variables('logAnalyticsWorkspaceName'))]"
+      ],
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces/', variables('logAnalyticsWorkspaceName'))]"
+      }
+    },
+    {
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2022-03-01",
+      "name": "[parameters('environment_name')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components/', variables('appInsightsName'))]"
+      ],
+      "properties": {
+        "daprAIInstrumentationKey": "[reference(resourceId('Microsoft.Insights/components/', variables('appInsightsName')), '2020-02-02').InstrumentationKey]",
+        "appLogsConfiguration": {
+          "destination": "log-analytics",
+          "logAnalyticsConfiguration": {
+            "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces/', variables('logAnalyticsWorkspaceName')), '2021-06-01').customerId]",
+            "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces/', variables('logAnalyticsWorkspaceName')), '2021-06-01').primarySharedKey]"
+          }
+        }
+      },
+      "resources": [
+        {
+          "type": "daprComponents",
+          "name": "statestore",
+          "apiVersion": "2022-03-01",
+          "dependsOn": [
+            "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
+            "[resourceId('Microsoft.App/containerApps/', 'nodeapp')]"
+          ],
+          "properties": {
+            "componentType": "state.azure.blobstorage",
+            "version": "v1",
+            "ignoreErrors": false,
+            "initTimeout": "5s",
+            "metadata": [
+              {
+                "name": "accountName",
+                "value": "[parameters('storage_account_name')]"
+              },
+              {
+                "name": "containerName",
+                "value": "[parameters('storage_container_name')]"
+              }
+            ],
+            "scopes": ["nodeapp"]
+          }
+        }
+      ]
+    },
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2022-03-01",
+      "name": "nodeapp",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]"
+      ],
+      "properties": {
+        "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
+        "configuration": {
+          "identity": {
+            "type": "SystemAssigned"
+          }
+          "ingress": {
+            "external": false,
+            "targetPort": 3000
+          },
+          "dapr": {
+            "enabled": true,
+            "appId": "nodeapp",
+            "appProcotol": "http",
+            "appPort": 3000
+          }
+        },
+        "template": {
+          "containers": [
+            {
+              "image": "dapriosamples/hello-k8s-node:latest",
+              "name": "hello-k8s-node",
+              "env": [
+                {
+                  "name": "APP_PORT",
+                  "value": "3000"
+                }
+              ],
+              "resources": {
+                "cpu": 0.5,
+                "memory": "1.0Gi"
+              }
+            }
+          ],
+          "scale": {
+            "minReplicas": 1,
+            "maxReplicas": 1
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2022-03-01",
+      "name": "pythonapp",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
+        "[resourceId('Microsoft.App/containerApps/', 'nodeapp')]"
+      ],
+      "properties": {
+        "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
+        "configuration": {
+          "dapr": {
+            "enabled": true,
+            "appId": "pythonapp"
+          }
+        },
+        "template": {
+          "containers": [
+            {
+              "image": "dapriosamples/hello-k8s-python:latest",
+              "name": "hello-k8s-python",
+              "resources": {
+                "cpu": 0.5,
+                "memory": "1.0Gi"
+              }
+            }
+          ],
+          "scale": {
+            "minReplicas": 1,
+            "maxReplicas": 1
+          }
+        }
+      }
+    }
+  ]
+}
