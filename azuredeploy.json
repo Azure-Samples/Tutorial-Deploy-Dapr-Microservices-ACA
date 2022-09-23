@@ -102,15 +102,15 @@
       "apiVersion": "2022-03-01",
       "name": "nodeapp",
       "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
       "dependsOn": [
         "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]"
       ],
       "properties": {
         "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
         "configuration": {
-          "identity": {
-            "type": "SystemAssigned"
-          }
           "ingress": {
             "external": false,
             "targetPort": 3000
