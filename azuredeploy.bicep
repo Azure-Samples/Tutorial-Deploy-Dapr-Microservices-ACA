@@ -2,7 +2,6 @@ param environment_name string = 'env-${uniqueSuffix}'
 param location string = resourceGroup().location
 param uniqueSeed string = '${subscription().subscriptionId}-${resourceGroup().name}'
 param uniqueSuffix string = uniqueString(uniqueSeed)
-param containerAppsEnvName string = 'env-${uniqueSuffix}'
 param storageAccountName string = 'storage${replace(uniqueSuffix, '-', '')}'
 param blobContainerName string = 'orders'
 var logAnalyticsWorkspaceName = 'logs-${environment_name}'
@@ -33,7 +32,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 }
 
 resource environment 'Microsoft.App/managedEnvironments@2022-03-01' = {
-  name: containerAppsEnvName
+  name: environment_name
   location: location
   properties: {
     daprAIInstrumentationKey: reference(appInsights.id, '2020-02-02').InstrumentationKey

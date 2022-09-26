@@ -2,23 +2,35 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
+    "uniqueSeed": {
+      "type": "string",
+      "defaultValue": "[concat(subscription().subscriptionId, resourceGroup().name)]"
+    },
+    "uniqueSuffix": {
+      "type": "string",
+      "defaultValue": "[uniqueString(parameters('uniqueSeed'))]"
+    },
     "environment_name": {
-      "type": "string"
+      "type": "string",
+      "defaultValue": "[concat('env-', parameters('uniqueSuffix'))]"
     },
     "location": {
-      "defaultValue": "canadacentral",
-      "type": "string"
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
     },
     "storage_account_name": {
-      "type": "string"
+      "type": "string",
+      "defaultValue": "[concat('storage', parameters(replace('uniqueSuffix', '-', '')))]"
     },
-    "storage_container_name": {
-      "type": "string"
+    "blobContainerName": {
+      "type": "string",
+      "defaultValue": "orders"
     }
   },
   "variables": {
     "logAnalyticsWorkspaceName": "[concat('logs-', parameters('environment_name'))]",
-    "appInsightsName": "[concat('appins-', parameters('environment_name'))]"
+    "appInsightsName": "[concat('appins-', parameters('environment_name'))]",
+    "dataContributorRoleDefinitionId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
   },
   "resources": [
     {
@@ -48,6 +60,51 @@
       "properties": {
         "Application_Type": "web",
         "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces/', variables('logAnalyticsWorkspaceName'))]"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2021-09-01",
+      "name": "[parameters('storage_account_name')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {},
+      "resources": [
+        {
+          "type": "blobServices",
+          "apiVersion": "2021-09-01",
+          "name": "default",
+          "dependsOn": [
+            "[resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name'))]"
+          ],
+          "resources": [
+            {
+              "type": "containers",
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storage_account_name'), 'default')]"
+              ],
+              "apiVersion": "2021-09-01",
+              "name": "[parameters('blobContainerName')]"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2020-04-01-preview",
+      "name": "[guid(resourceGroup().id, extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name')), 'Microsoft.Authorization/roleDefinitions', variables('dataContributorRoleDefinitionId')))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.App/containerApps', 'nodeapp')]",
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name')), 'Microsoft.Authorization/roleDefinitions', variables('dataContributorRoleDefinitionId'))]",
+        "principalId": "[reference(resourceId('Microsoft.App/containerApps', 'nodeapp'), '2022-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
       }
     },
     {
@@ -89,7 +146,7 @@
               },
               {
                 "name": "containerName",
-                "value": "[parameters('storage_container_name')]"
+                "value": "[parameters('blobContainerName')]"
               }
             ],
             "scopes": ["nodeapp"]
