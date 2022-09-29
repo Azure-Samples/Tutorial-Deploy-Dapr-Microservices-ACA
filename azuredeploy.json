@@ -25,6 +25,10 @@
     "blobContainerName": {
       "type": "string",
       "defaultValue": "orders"
+    },
+    "managedIdentityName": {
+      "type": "string",
+      "defaultValue": "nodeapp-identity"
     }
   },
   "variables": {
@@ -94,16 +98,22 @@
       ]
     },
     {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2022-01-31-preview",
+      "name": "[parameters('managedIdentityName')]",
+      "location": "[parameters('location')]"
+    },
+    {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2020-04-01-preview",
       "name": "[guid(resourceGroup().id, extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name')), 'Microsoft.Authorization/roleDefinitions', variables('dataContributorRoleDefinitionId')))]",
       "dependsOn": [
-        "[resourceId('Microsoft.App/containerApps', 'nodeapp')]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name'))]"
       ],
       "properties": {
         "roleDefinitionId": "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name')), 'Microsoft.Authorization/roleDefinitions', variables('dataContributorRoleDefinitionId'))]",
-        "principalId": "[reference(resourceId('Microsoft.App/containerApps', 'nodeapp'), '2022-03-01', 'full').identity.principalId]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).principalId]",
         "principalType": "ServicePrincipal"
       }
     },
@@ -131,8 +141,7 @@
           "name": "statestore",
           "apiVersion": "2022-03-01",
           "dependsOn": [
-            "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
-            "[resourceId('Microsoft.App/containerApps/', 'nodeapp')]"
+            "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]"
           ],
           "properties": {
             "componentType": "state.azure.blobstorage",
@@ -147,6 +156,10 @@
               {
                 "name": "containerName",
                 "value": "[parameters('blobContainerName')]"
+              },
+              {
+                "name": "azureClientId",
+                "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))).clientId]"
               }
             ],
             "scopes": ["nodeapp"]
@@ -157,14 +170,54 @@
     {
       "type": "Microsoft.App/containerApps",
       "apiVersion": "2022-03-01",
+      "name": "pythonapp",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
+        "[resourceId('Microsoft.App/containerApps/', 'nodeapp')]"
+      ],
+      "properties": {
+        "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
+        "configuration": {
+          "dapr": {
+            "enabled": true,
+            "appId": "pythonapp"
+          }
+        },
+        "template": {
+          "containers": [
+            {
+              "image": "dapriosamples/hello-k8s-python:latest",
+              "name": "hello-k8s-python",
+              "resources": {
+                "cpu": 0.5,
+                "memory": "1.0Gi"
+              }
+            }
+          ],
+          "scale": {
+            "minReplicas": 1,
+            "maxReplicas": 1
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2022-03-01",
       "name": "nodeapp",
+      "dependsOn": [
+        "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]"
+      ],
       "location": "[parameters('location')]",
       "identity": {
-        "type": "SystemAssigned"
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]": {}
+        }
       },
-      "dependsOn": [
-        "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]"
-      ],
       "properties": {
         "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
         "configuration": {
@@ -190,41 +243,6 @@
                   "value": "3000"
                 }
               ],
-              "resources": {
-                "cpu": 0.5,
-                "memory": "1.0Gi"
-              }
-            }
-          ],
-          "scale": {
-            "minReplicas": 1,
-            "maxReplicas": 1
-          }
-        }
-      }
-    },
-    {
-      "type": "Microsoft.App/containerApps",
-      "apiVersion": "2022-03-01",
-      "name": "pythonapp",
-      "location": "[parameters('location')]",
-      "dependsOn": [
-        "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
-        "[resourceId('Microsoft.App/containerApps/', 'nodeapp')]"
-      ],
-      "properties": {
-        "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments/', parameters('environment_name'))]",
-        "configuration": {
-          "dapr": {
-            "enabled": true,
-            "appId": "pythonapp"
-          }
-        },
-        "template": {
-          "containers": [
-            {
-              "image": "dapriosamples/hello-k8s-python:latest",
-              "name": "hello-k8s-python",
               "resources": {
                 "cpu": 0.5,
                 "memory": "1.0Gi"

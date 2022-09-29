@@ -4,6 +4,7 @@ param uniqueSeed string = '${subscription().subscriptionId}-${resourceGroup().na
 param uniqueSuffix string = uniqueString(uniqueSeed)
 param storageAccountName string = 'storage${replace(uniqueSuffix, '-', '')}'
 param blobContainerName string = 'orders'
+param managedIdentityName string = 'nodeapp-identity'
 var logAnalyticsWorkspaceName = 'logs-${environment_name}'
 var appInsightsName = 'appins-${environment_name}'
 
@@ -66,6 +67,11 @@ resource blobContainer 'Microsoft.Storage/storageAccounts/blobServices/container
   name: blobContainerName
 }
 
+resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2022-01-31-preview' = {
+  name: managedIdentityName
+  location: location
+}
+
 // Grant permissions for the container app to write to Azure Blob via Managed Identity 
 @description('This is the built-in Storage Blob Data Contributor role. See https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#storage-blob-data-contributor')
 resource contributorRoleDefinition 'Microsoft.Authorization/roleDefinitions@2018-01-01-preview' existing = {
@@ -77,7 +83,7 @@ resource roleAssignment 'Microsoft.Authorization/roleAssignments@2020-04-01-prev
   name: guid(resourceGroup().id, contributorRoleDefinition.id)
   properties: {
     roleDefinitionId: contributorRoleDefinition.id
-    principalId: nodeapp.identity.principalId
+    principalId: managedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
 }
@@ -100,11 +106,18 @@ resource daprComponent 'Microsoft.App/managedEnvironments/daprComponents@2022-03
         name: 'containerName'
         value: blobContainerName
       }
+      {
+        name: 'azureClientId'
+        value: managedIdentity.properties.clientId
+      }
     ]
     scopes: [
       'nodeapp'
     ]
   }
+  dependsOn: [
+    storageAccount
+  ]
 }
 
 
@@ -112,7 +125,10 @@ resource nodeapp 'Microsoft.App/containerApps@2022-03-01' = {
   name: 'nodeapp'
   location: location
   identity: {
-    type: 'SystemAssigned'
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentity.id}' : {}
+    }
   }
   properties: {
     managedEnvironmentId: environment.id
@@ -151,14 +167,14 @@ resource nodeapp 'Microsoft.App/containerApps@2022-03-01' = {
       }
     }
   }
+  dependsOn: [
+    daprComponent
+  ]
 }
 
 resource pythonapp 'Microsoft.App/containerApps@2022-03-01' = {
   name: 'pythonapp'
   location: location
-  identity: {
-    type: 'SystemAssigned'
-  }
   properties: {
     managedEnvironmentId: environment.id
     configuration: {
@@ -188,4 +204,3 @@ resource pythonapp 'Microsoft.App/containerApps@2022-03-01' = {
     nodeapp
   ]
 }
-
